@@ -36,7 +36,6 @@ jobs:
           python -m pip install idf-component-manager==2.5.0
           idf.py -C firmware -B "$PWD/firmware/build" -D "SDKCONFIG=$PWD/firmware/build/sdkconfig" \
             merge-bin -o desk-remote-tab5.bin
-          git diff -- firmware/dependencies.lock
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -44,7 +43,6 @@ jobs:
           path: |
             firmware/build/desk-remote-tab5.bin
             firmware/build/tab5_slint_smoke.bin
-            firmware/dependencies.lock
           if-no-files-found: error
 
   companion:

@@ -101,10 +101,12 @@ The firmware targets the ESP32-P4 Tab5 with an ST7123 display and touch
 controller. It uses Espressif’s ST7123 drivers and an Apache-2.0 panel
 initialization table from Espressif’s Tab5 board support package.
 
-With ESP-IDF 5.4.2 active in your terminal, run from the project root:
+CI uses ESP-IDF 5.4.2 with IDF Component Manager 2.5.0. To match the CI build,
+activate ESP-IDF and run the following commands from the project root.
 
 ```sh
 rustup target add riscv32imafc-unknown-none-elf
+python -m pip install idf-component-manager==2.5.0
 unset IDF_COMPONENT_LOCAL_STORAGE_URL
 idf.py -C firmware -B "$PWD/firmware/build/wifi" -D "SDKCONFIG=$PWD/firmware/build/wifi/sdkconfig" build
 ```

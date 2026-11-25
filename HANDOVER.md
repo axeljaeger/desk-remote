@@ -12,7 +12,7 @@ Imported from the local `tab5` project on 25 November 2026. The application uses
 | Tab5 connectivity | USB handles setup and control. After pairing, the client prefers the authenticated LAN link and uses Bonjour to rediscover the Mac. |
 | Raspberry Pi | A native client is planned. The first milestone is a Linux build of the shared UI running on Pi hardware. |
 
-The original pairing data stays on the Mac and the Tab5. Device permissions are managed by macOS. The macOS bundle still uses its existing name and identity, so the repository rename needs no Companion or pairing migration. The repository contains the build defaults and dependency locks. The former local Wi-Fi build had a UDP receive mailbox of 6 while `firmware/sdkconfig.defaults` specifies 16. Use 16 for fresh builds and record the effective value when comparing camera performance.
+Pairing data lives on the Mac and Tab5. macOS manages device permissions for the bundle identifier `dev.tab5.companion`, which appears in the menu bar as Pro Remote. The repository contains the build defaults and dependency locks. The former local Wi-Fi build had a UDP receive mailbox of 6 while `firmware/sdkconfig.defaults` specifies 16. Use 16 for fresh builds and record the effective value when comparing camera performance.
 
 ## Parallel work
 
