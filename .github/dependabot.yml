@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      slint:
+        patterns:
+          - slint
+          - slint-*
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

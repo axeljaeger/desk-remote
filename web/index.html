@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pro Remote</title>
+    <style>
+      body { margin: 0; background: #0a141b; color: #a9c6cb; font: 16px system-ui; }
+      main { display: grid; min-height: 100dvh; place-content: center; }
+      #screen { position: relative; width: 1280px; height: 720px; transform-origin: top left; }
+      canvas { display: block; width: 1280px; height: 720px; }
+      #camera-image { position: absolute; object-fit: contain; background: #111714; border-radius: 13px; pointer-events: none; }
+      p { position: fixed; inset: auto 16px 0; }
+    </style>
+  </head>
+  <body>
+    <main><div id="viewport"><div id="screen"><canvas id="canvas" width="1280" height="720"></canvas><img id="camera-image" alt="Livebild der gewählten Kamera" hidden></div></div></main>
+    <p id="status" role="status">Loading Slint…</p>
+    <script type="module">
+      const viewport = document.querySelector('#viewport');
+      const screen = document.querySelector('#screen');
+      const status = document.querySelector('#status');
+      function fitScreen() {
+        const scale = Math.min(innerWidth / 1280, innerHeight / 720, 1);
+        viewport.style.width = `${1280 * scale}px`;
+        viewport.style.height = `${720 * scale}px`;
+        screen.style.transform = `scale(${scale})`;
+      }
+      window.addEventListener('resize', fitScreen);
+      fitScreen();
+
+      const updates = new EventSource('/reload');
+      let buildStatus = status.textContent;
+      let companionStatus = '';
+      function renderStatus() {
+        status.textContent = [buildStatus, companionStatus].filter(Boolean).join(' · ');
+        status.hidden = !status.textContent;
+      }
+      updates.addEventListener('reload', () => location.reload());
+      updates.addEventListener('build-status', (event) => {
+        buildStatus = event.data;
+        renderStatus();
+      });
+      updates.addEventListener('companion-status', (event) => {
+        companionStatus = event.data;
+        renderStatus();
+      });
+      let slint;
+      try {
+        slint = await import('/pkg/tab5_slint_smoke.js');
+        await slint.default();
+      } catch (error) {
+        // Winit throws this sentinel when it hands control to the browser event loop.
+        if (error.message !== "Using exceptions for control flow, don't mind me. This isn't actually an error!") {
+          buildStatus = `Slint konnte nicht gestartet werden. ${error.message}`;
+          renderStatus();
+          throw error;
+        }
+      }
+      buildStatus = '';
+      renderStatus();
+      slint.restore_preview_page?.(Number(sessionStorage.getItem('pro-remote-page') ?? 0), page => {
+        sessionStorage.setItem('pro-remote-page', String(page));
+      });
+
+      let generation = 0;
+      let selecting = false;
+      let polling = false;
+      async function pollAudio() {
+        if (selecting || polling) return;
+        polling = true;
+        const requestGeneration = generation;
+        try {
+          const reply = await fetch('/api/audio', { cache: 'no-store' });
+          if (!reply.ok) throw new Error('Mac nicht erreichbar');
+          const state = await reply.text();
+          if (requestGeneration === generation) slint.apply_audio_state(state);
+        } catch {
+          if (requestGeneration === generation) slint.audio_disconnected();
+        } finally {
+          polling = false;
+        }
+      }
+
+      slint.on_audio_selection(async (direction, id) => {
+        if (selecting) return;
+        selecting = true;
+        generation += 1;
+        try {
+          const reply = await fetch('/api/audio', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ direction, id }),
+          });
+          if (!reply.ok) throw new Error('Audiogerät konnte nicht umgeschaltet werden');
+          slint.apply_audio_state(await reply.text());
+        } catch {
+          slint.audio_disconnected();
+        } finally {
+          selecting = false;
+        }
+      });
+      pollAudio();
+      setInterval(pollAudio, 1000);
+
+      let mediaPending = false;
+      slint.on_media_action?.(async id => {
+        if (mediaPending) return;
+        mediaPending = true;
+        try {
+          const reply = await fetch('/api/media', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+            signal: AbortSignal.timeout(2500),
+          });
+          if (!reply.ok) throw new Error('Mac-Mediensteuerung nicht erreichbar');
+          const result = await reply.json();
+          if (result.version !== 1 || typeof result.message !== 'string') throw new Error('Ungültige Medienantwort');
+          slint.set_media_message(result.message);
+        } catch {
+          slint.set_media_message('Mac-Mediensteuerung nicht erreichbar');
+        } finally {
+          mediaPending = false;
+        }
+      });
+
+      let meterOn = false;
+      let meterRequest;
+      class MeterRequestError extends Error {}
+      async function requestMeter(enabled) {
+        const reply = await fetch('/api/meter', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled }),
+          signal: AbortSignal.timeout(2000),
+          keepalive: !enabled,
+        });
+        if (reply.status === 404) throw new MeterRequestError('Vorschau-Server neu starten');
+        if (reply.status === 503) throw new MeterRequestError('Mac-App antwortet nicht auf die Pegelabfrage');
+        if (!reply.ok) throw new MeterRequestError(`Pegelabfrage fehlgeschlagen (HTTP ${reply.status})`);
+        const reading = await reply.json();
+        if (reading.version !== 1) throw new Error('Ungültiger Mikrofonpegel');
+        return reading;
+      }
+
+      function stopMeter(message = '') {
+        if (!meterOn) return;
+        meterOn = false;
+        slint.set_meter(false, -60, -60, false, message);
+        const stopping = Promise.resolve(meterRequest).catch(() => {}).then(() => requestMeter(false)).catch(() => {});
+        meterRequest = stopping;
+        stopping.then(() => { if (meterRequest === stopping) meterRequest = undefined; });
+      }
+
+      async function pollMeter() {
+        if (!meterOn) return;
+        if (document.hidden || !slint.meter_visible()) {
+          stopMeter();
+          return;
+        }
+        if (meterRequest) return;
+        const pending = requestMeter(true);
+        meterRequest = pending;
+        try {
+          const reading = await pending;
+          if (meterRequest !== pending) return;
+          if (reading.status === 'active' && Number.isFinite(reading.rms_db) && Number.isFinite(reading.peak_db)) {
+            slint.set_meter(true, Math.round(reading.rms_db), Math.round(reading.peak_db), reading.clipping, '');
+          } else if (reading.status === 'pending') {
+            slint.set_meter(true, -60, -60, false, reading.message);
+          } else {
+            stopMeter(reading.message ?? 'Mikrofonpegel nicht verfügbar');
+          }
+        } catch (error) {
+          if (meterRequest === pending) {
+            stopMeter(error instanceof MeterRequestError ? error.message : 'Mikrofonpegel nicht erreichbar');
+          }
+        } finally {
+          if (meterRequest === pending) meterRequest = undefined;
+        }
+      }
+
+      slint.on_meter_toggle(() => {
+        if (meterOn) {
+          stopMeter();
+          return;
+        }
+        meterOn = true;
+        slint.set_meter(true, -60, -60, false, 'Messung wird gestartet');
+        pollMeter();
+      });
+      setInterval(pollMeter, 80);
+      document.addEventListener('visibilitychange', () => { if (document.hidden) stopMeter(); });
+      window.addEventListener('pagehide', () => stopMeter());
+
+      let cameras = [];
+      let lastCameraList;
+      let cameraListFailed = false;
+      let listingCameras = false;
+      let selectedCamera;
+      let cameraOn = false;
+      let cameraRequest;
+      let streamTicket;
+      let positionFrame;
+      const cameraImage = document.querySelector('#camera-image');
+      const cameraVisible = () => !document.hidden && slint.camera_visible();
+
+      function closeCameraStream() {
+        streamTicket = undefined;
+        cancelAnimationFrame(positionFrame);
+        cameraImage.hidden = true;
+        cameraImage.removeAttribute('src');
+      }
+
+      function positionCameraImage() {
+        if (!streamTicket) return;
+        if (!cameraVisible()) { stopCamera(); return; }
+        const bounds = slint.camera_overlay_bounds();
+        ['left', 'top', 'width', 'height'].forEach((key, index) => {
+          cameraImage.style[key] = `${bounds[index]}px`;
+        });
+        positionFrame = requestAnimationFrame(positionCameraImage);
+      }
+
+      function openCameraStream(ticket) {
+        if (ticket === streamTicket) return;
+        closeCameraStream();
+        streamTicket = ticket;
+        positionCameraImage();
+        cameraImage.src = `/api/camera-stream/${encodeURIComponent(ticket)}`;
+      }
+
+      cameraImage.addEventListener('load', () => {
+        if (streamTicket && cameraVisible()) cameraImage.hidden = false;
+      });
+      cameraImage.addEventListener('error', () => {
+        if (streamTicket) stopCamera('Kamera-Stream nicht erreichbar');
+      });
+
+      function selectCamera(camera) {
+        if (selectedCamera?.id !== camera?.id) {
+          closeCameraStream();
+          slint.set_camera_status(cameraOn, cameraOn ? 'Kamera wird gestartet' : '');
+        }
+        selectedCamera = camera;
+        slint.set_camera_selection(camera?.id ?? '', camera?.name ?? '');
+      }
+
+      async function listCameras() {
+        if (!cameraVisible() || listingCameras) return;
+        listingCameras = true;
+        try {
+          const response = await fetch('/api/cameras', { cache: 'no-store', signal: AbortSignal.timeout(2000) });
+          if (!response.ok) throw new Error('Kameraliste nicht erreichbar');
+          const payload = await response.text();
+          if (cameraListFailed && !cameraOn) slint.set_camera_status(false, '');
+          cameraListFailed = false;
+          if (payload === lastCameraList) return;
+          slint.set_camera_list(payload);
+          lastCameraList = payload;
+          cameras = JSON.parse(payload).cameras;
+          const previous = cameras.find(camera => camera.id === selectedCamera?.id);
+          if (!previous && cameraOn) stopCamera('Die gewählte Kamera wurde getrennt');
+          selectCamera(previous ?? cameras[0]);
+        } catch {
+          cameraListFailed = true;
+          if (!cameraOn) slint.set_camera_status(false, 'Kameraliste nicht erreichbar. Mac-App prüfen.');
+        } finally {
+          listingCameras = false;
+        }
+      }
+
+      async function requestCamera(command) {
+        const response = await fetch('/api/cameras', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(command),
+          signal: AbortSignal.timeout(2500),
+          keepalive: !command.enabled,
+        });
+        if (!response.ok) throw new Error('Kamera-Vorschau nicht erreichbar');
+        const reading = await response.json();
+        if (reading.version !== 1) throw new Error('Ungültiger Kamerastatus');
+        return reading;
+      }
+
+      function stopCamera(message = '') {
+        if (!cameraOn) return;
+        cameraOn = false;
+        closeCameraStream();
+        slint.set_camera_status(false, message);
+        const stopped = Promise.resolve(cameraRequest).catch(() => {}).then(() => requestCamera({ enabled: false })).catch(() => {});
+        cameraRequest = stopped;
+        stopped.then(() => { if (cameraRequest === stopped) cameraRequest = undefined; });
+      }
+
+      async function pollCamera() {
+        if (!cameraOn) return;
+        if (!cameraVisible() || !selectedCamera) { stopCamera(); return; }
+        if (cameraRequest) return;
+        const camera = selectedCamera.id;
+        const pending = requestCamera({ enabled: true, id: camera });
+        cameraRequest = pending;
+        const current = () => cameraRequest === pending && selectedCamera?.id === camera && cameraVisible();
+        try {
+          const reading = await pending;
+          if (!current()) return;
+          if (reading.status === 'active' && reading.ticket) {
+            openCameraStream(reading.ticket);
+          } else if (reading.status === 'pending' || reading.status === 'starting') {
+            closeCameraStream();
+            slint.set_camera_status(true, reading.message ?? '');
+          } else {
+            stopCamera(reading.message ?? 'Kamera-Vorschau nicht verfügbar');
+          }
+        } catch {
+          if (current()) stopCamera('Kamera-Vorschau nicht erreichbar');
+        } finally {
+          if (cameraRequest === pending) cameraRequest = undefined;
+        }
+      }
+
+      slint.on_camera_action(id => {
+        const camera = cameras.find(entry => entry.id === id);
+        if (camera) selectCamera(camera);
+      }, () => {
+        if (cameraOn) { stopCamera(); return; }
+        if (!selectedCamera || !cameraVisible()) return;
+        cameraOn = true;
+        slint.set_camera_status(true, 'Kamera wird gestartet');
+        pollCamera();
+      });
+      setInterval(listCameras, 800);
+      setInterval(pollCamera, 300);
+
+      let displayRequest;
+      function updateDisplays(command) {
+        if (document.hidden || !slint.display_visible() || (!command && displayRequest)) return;
+        const options = command ? {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(command),
+        } : { cache: 'no-store' };
+        const pending = Promise.resolve(displayRequest).then(async () => {
+          const response = await fetch('/api/displays', { ...options, signal: AbortSignal.timeout(2000) });
+          if (!response.ok) throw new Error('Monitorsteuerung nicht erreichbar');
+          slint.set_display_state(await response.text());
+        }).catch(() => slint.display_disconnected());
+        displayRequest = pending;
+        pending.then(() => { if (displayRequest === pending) displayRequest = undefined; });
+      }
+      slint.on_display_brightness((id, brightness) => updateDisplays({ id, brightness }));
+      setInterval(() => updateDisplays(), 900);
+
+      document.addEventListener('visibilitychange', () => { if (document.hidden) stopCamera(); });
+      window.addEventListener('pagehide', () => stopCamera());
+    </script>
+  </body>
+</html>

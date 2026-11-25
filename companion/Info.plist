@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key><string>dev.tab5.companion</string>
+    <key>CFBundleName</key><string>Pro Remote</string>
+    <key>CFBundleExecutable</key><string>Tab5Companion</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSMinimumSystemVersion</key><string>13.0</string>
+    <key>LSUIElement</key><true/>
+    <key>NSMicrophoneUsageDescription</key><string>Pro Remote misst den Pegel des ausgewählten Mac-Mikrofons, wenn du das Pegelmeter einschaltest.</string>
+    <key>NSCameraUsageDescription</key><string>Pro Remote zeigt das Bild der ausgewählten Mac-Kamera, wenn du die Vorschau startest.</string>
+    <key>NSCameraUseContinuityCameraDeviceType</key><true/>
+    <key>NSLocalNetworkUsageDescription</key><string>Pro Remote überträgt die Kameravorschau verschlüsselt an dein gekoppeltes Tab5 und empfängt dessen Steuerbefehle im WLAN.</string>
+    <key>NSBonjourServices</key><array><string>_proremote._tcp</string></array>
+</dict>
+</plist>

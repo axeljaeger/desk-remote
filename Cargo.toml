@@ -1,0 +1,31 @@
+[package]
+name = "tab5-slint-smoke"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+slint = { version = "=1.19.0", default-features = false, features = ["compat-1-18"] }
+
+[target.'cfg(any(target_os = "none", target_arch = "wasm32"))'.dependencies]
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+
+[target.'cfg(not(target_os = "none"))'.dependencies]
+slint = { version = "=1.19.0", default-features = false, features = ["std", "backend-winit", "renderer-femtovg"] }
+
+[target.'cfg(target_os = "none")'.dependencies]
+slint = { version = "=1.19.0", default-features = false, features = ["libm", "renderer-software", "unsafe-single-threaded"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+
+[build-dependencies]
+slint-build = "=1.19.0"
+
+[profile.release]
+panic = "abort"

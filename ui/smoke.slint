@@ -1,0 +1,51 @@
+export component SmokeWindow inherits Window {
+    preferred-width: 1280px;
+    preferred-height: 720px;
+    background: #101e28;
+
+    in property <int> tap-count: 0;
+    callback tapped();
+
+    Text {
+        width: parent.width;
+        y: parent.height * 0.24;
+        horizontal-alignment: center;
+        text: "Tab5 Slint smoke test";
+        color: #a9c6cb;
+        font-size: 32px;
+    }
+
+    Text {
+        width: parent.width;
+        y: parent.height * 0.34;
+        horizontal-alignment: center;
+        text: "\{root.tap-count}";
+        color: #f3f8f6;
+        font-size: 96px;
+    }
+
+    Rectangle {
+        width: 300px;
+        height: 100px;
+        x: (parent.width - self.width) / 2;
+        y: parent.height * 0.61;
+        border-radius: 18px;
+        background: tap.pressed ? #54b29b : #8be3c9;
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            text: "Tap me";
+            color: #102820;
+            font-size: 34px;
+        }
+
+        tap := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            clicked => { root.tapped(); }
+        }
+    }
+}

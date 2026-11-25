@@ -1,0 +1,426 @@
+export struct AudioDevice { id: string, name: string }
+export struct MonitorDevice { id: string, name: string, detail: string, brightness: int }
+
+component Panel inherits Rectangle {
+    in property <string> heading;
+    in property <string> detail;
+    border-radius: 22px;
+    background: #202521;
+    border-width: 1px;
+    border-color: #343b34;
+    Text { x: 24px; y: 20px; text: root.heading; color: #f3f2e9; font-size: 27px; }
+    Text { x: 24px; y: 54px; text: root.detail; color: #aab8ac; font-size: 17px; }
+    @children
+}
+
+component DeviceList inherits Panel {
+    in property <[AudioDevice]> devices;
+    in property <string> active-id;
+    in property <bool> online;
+    in property <length> bottom-inset;
+    in property <string> active-label: "Aktiv";
+    in property <string> no-devices: "Keine Geräte verfügbar";
+    in-out property <length> scroll-y;
+    callback select(string);
+    Flickable {
+        x: 16px; y: 88px;
+        content-y <=> root.scroll-y;
+        width: root.width - 32px;
+        height: root.height - 104px - root.bottom-inset;
+        content-width: self.width;
+        content-height: max(self.height, root.devices.length * 67px);
+        for device[index] in root.devices: Rectangle {
+            x: 0px; y: index * 67px;
+            width: root.width - 32px; height: 60px;
+            border-radius: 13px;
+            property <bool> active: device.id == root.active-id;
+            background: active ? #354331 : row.pressed ? #323b33 : #292f2a;
+            Text {
+                x: 18px; width: parent.width - 112px; height: parent.height;
+                text: device.name; color: #f3f2e9; font-size: 22px;
+                overflow: elide; vertical-alignment: center;
+            }
+            Text {
+                x: parent.width - 88px; width: 68px; height: parent.height;
+                text: active ? root.active-label : ""; color: #d4e9aa; font-size: 17px;
+                horizontal-alignment: right; vertical-alignment: center;
+            }
+            row := TouchArea { enabled: root.online; clicked => { root.select(device.id); } }
+        }
+    }
+    if root.devices.length == 0: Text {
+        x: 24px; y: 100px; color: #aab8ac; font-size: 19px;
+        text: root.online ? root.no-devices : "Warte auf den Mac";
+    }
+}
+
+component MonitorDetails inherits Panel {
+    in property <int> brightness: -1;
+    in property <bool> online;
+    in property <string> message;
+    callback change(int);
+
+    Text { x: 24px; y: 106px; text: "Helligkeit"; color: #f3f2e9; font-size: 22px; }
+    if root.brightness < 0: Text {
+        x: 24px; y: 147px; width: parent.width - 48px;
+        text: "Hardware-Helligkeit nicht verfügbar";
+        color: #aab8ac; font-size: 19px; wrap: word-wrap;
+    }
+    if root.brightness >= 0: Rectangle {
+        x: 24px; y: 156px; width: parent.width - 48px; height: 16px;
+        border-radius: 8px; background: #141a17;
+        Rectangle {
+            x: 0px; y: 0px; height: parent.height; width: root.brightness * parent.width / 100;
+            border-radius: 8px; background: #d4e9aa;
+        }
+    }
+    if root.brightness >= 0: Text {
+        y: 202px; width: parent.width; height: 54px;
+        text: "\{root.brightness}%"; horizontal-alignment: center; vertical-alignment: center;
+        color: #f3f2e9; font-size: 22px;
+    }
+    for delta[index] in [-5, 5]: Rectangle {
+        visible: root.brightness >= 0;
+        x: index == 0 ? 24px : parent.width - 92px; y: 202px;
+        width: 68px; height: 54px; border-radius: 13px;
+        property <bool> available: root.online && (delta < 0 ? root.brightness > 0 : root.brightness < 100);
+        background: !available ? #252b26 : button.pressed ? #354331 : #292f2a;
+        Text {
+            width: parent.width; height: parent.height;
+            text: delta < 0 ? "−" : "+"; color: parent.available ? #d4e9aa : #839185;
+            font-size: 27px; horizontal-alignment: center; vertical-alignment: center;
+        }
+        button := TouchArea {
+            enabled: parent.available;
+            clicked => { root.change(max(0, min(100, root.brightness + delta))); }
+        }
+    }
+    Text {
+        x: 24px; y: 276px; width: parent.width - 48px;
+        text: root.message; color: #f7b99c; font-size: 19px; wrap: word-wrap;
+    }
+}
+
+component InputMeter inherits Rectangle {
+    in property <bool> enabled;
+    in property <bool> measuring;
+    in property <bool> clipping;
+    in property <int> rms;
+    in property <int> peak;
+    in property <string> message;
+    callback toggle();
+
+    height: 154px;
+    border-radius: 15px;
+    background: #181e1b;
+    Text { x: 16px; y: 12px; text: "Mikrofonpegel"; color: #f3f2e9; font-size: 20px; }
+    Rectangle {
+        width: 118px; height: 36px; x: parent.width - self.width - 12px; y: 8px;
+        border-radius: 9px;
+        background: !root.enabled ? #232a24 : root.measuring ? #354331 : #d4e9aa;
+        Text {
+            width: parent.width; height: parent.height; horizontal-alignment: center; vertical-alignment: center;
+            color: !root.enabled ? #839185 : root.measuring ? #d4e9aa : #1d281a;
+            text: root.measuring ? "Stoppen" : "Messen";
+            font-size: 16px;
+        }
+        TouchArea { enabled: root.enabled; clicked => { root.toggle(); } }
+    }
+    track := Rectangle {
+        x: 16px; y: 55px; width: root.width - 32px; height: 22px;
+        property <length> step: self.width / 48;
+        for segment in 48: Rectangle {
+            property <float> db: -60 + (segment + 1) * 60 / 48;
+            x: segment * track.step; width: track.step - 2px; height: track.height; border-radius: 2px;
+            background: root.rms < db ? #29342c : db >= -3 ? #f27e68 : db >= -12 ? #eac16f : #a8cf85;
+        }
+        if root.peak > -60: Rectangle {
+            x: min(track.width - self.width, track.width * ((root.peak + 60) / 60.0));
+            width: 3px; height: track.height + 4px; y: -2px; border-radius: 1px;
+            background: root.clipping ? #ff8c76 : #f5f6e8;
+        }
+    }
+    for tick in 6: Text {
+        x: track.x + (track.width - self.width) * tick / 5.0; y: 82px; width: 37px;
+        text: "\{tick * 12 - 60}"; color: #aab8ac; font-size: 15px;
+        horizontal-alignment: tick == 0 ? left : tick == 5 ? right : center;
+    }
+    Text {
+        x: 16px; y: 113px; width: parent.width - 112px;
+        color: #dce8d9; font-size: 17px; overflow: elide;
+        text: root.message != "" ? root.message : root.measuring ? "RMS \{root.rms}   Spitze \{root.peak} dBFS" : "Messung aus";
+    }
+    if root.clipping: Text {
+        x: parent.width - 70px; y: 113px; width: 54px;
+        horizontal-alignment: right; text: "CLIP"; color: #ff8c76; font-size: 17px; font-weight: 700;
+    }
+}
+
+component EmptyPanel inherits Panel {
+    in property <string> empty-text;
+    Text {
+        x: 24px; y: 92px; width: parent.width - 48px; height: parent.height - 116px;
+        text: root.empty-text; color: #aab8ac; font-size: 22px; wrap: word-wrap;
+        horizontal-alignment: center; vertical-alignment: center;
+    }
+}
+
+component CameraPanel inherits Panel {
+    in property <bool> running;
+    in property <bool> can-start;
+    in property <string> message;
+    in property <image> frame;
+    in property <bool> has-frame;
+    in property <bool> native-frame;
+    out property <length> preview-x: preview.x;
+    out property <length> preview-y: preview.y;
+    out property <length> preview-width: preview.width;
+    out property <length> preview-height: preview.height;
+    callback toggle();
+
+    Rectangle {
+        width: 146px; height: 42px; x: parent.width - self.width - 20px; y: 20px;
+        border-radius: 10px;
+        background: !root.can-start ? #26302a : root.running ? #354331 : #d4e9aa;
+        Text {
+            width: parent.width; height: parent.height; horizontal-alignment: center; vertical-alignment: center;
+            text: root.running ? "Stoppen" : "Vorschau starten";
+            color: !root.can-start ? #839185 : root.running ? #d4e9aa : #1d281a;
+            font-size: 16px;
+        }
+        TouchArea { enabled: root.can-start; clicked => { root.toggle(); } }
+    }
+
+    preview := Rectangle {
+        x: 16px; y: 90px; width: root.width - 32px; height: root.height - 106px;
+        border-radius: 13px; background: #111714; clip: true;
+        if !root.has-frame: Text {
+            x: 26px; width: parent.width - 52px; height: parent.height;
+            text: root.message; color: #aab8ac; font-size: 21px; wrap: word-wrap;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+        if root.has-frame && !root.native-frame: Image { width: parent.width; height: parent.height; source: root.frame; image-fit: contain; }
+    }
+}
+
+export component CompanionWindow inherits Window {
+    preferred-width: 1280px;
+    preferred-height: 720px;
+    background: #151a17;
+    in property <bool> preview;
+    in property <bool> browser-preview;
+    in property <bool> connected;
+    in property <bool> network-connected;
+    in property <string> audio-error;
+    in property <[AudioDevice]> inputs: preview ? [
+        { id: "built-in-mic", name: "MacBook-Mikrofon" },
+        { id: "usb-mic", name: "USB-Mikrofon" },
+    ] : [];
+    in property <[AudioDevice]> outputs: preview ? [
+        { id: "speakers", name: "MacBook-Lautsprecher" },
+        { id: "headphones", name: "Kopfhörer" },
+        { id: "monitor", name: "Display-Audio" },
+    ] : [];
+    in-out property <string> active-input: preview ? "built-in-mic" : "";
+    in-out property <string> active-output: preview ? "speakers" : "";
+    callback select-audio(string, string);
+    callback toggle-meter();
+    in property <bool> meter-measuring;
+    in property <int> meter-rms: -60;
+    in property <int> meter-peak: -60;
+    in property <bool> meter-clipping;
+    in property <string> meter-message;
+    out property <bool> meter-visible: page == 0 && connected;
+    out property <bool> camera-visible: page == 2 && connected && (browser-preview || network-connected);
+    in property <[AudioDevice]> cameras;
+    in property <string> selected-camera;
+    in property <string> camera-name;
+    in property <string> camera-message;
+    in property <bool> camera-running;
+    in property <image> camera-frame;
+    in property <bool> camera-has-frame;
+    in property <bool> camera-native-frame;
+    in property <int> camera-fps;
+    out property <bool> display-visible: page == 3 && connected && (browser-preview || network-connected);
+    in property <[AudioDevice]> display-items;
+    in property <[MonitorDevice]> displays;
+    in property <string> selected-display;
+    in property <string> display-message;
+    callback select-display(string);
+    callback set-display-brightness(string, int);
+    callback select-camera(string);
+    callback toggle-camera();
+    callback media-action(string);
+    in property <string> media-message;
+    out property <length> camera-overlay-x: viewport.x + slide.x + camera-panel.x + camera-panel.preview-x;
+    out property <length> camera-overlay-y: viewport.y + camera-panel.y + camera-panel.preview-y;
+    out property <length> camera-overlay-width: camera-panel.preview-width;
+    out property <length> camera-overlay-height: camera-panel.preview-height;
+    in-out property <int> page: 0;
+    in property <bool> snapshot-layout;
+    in-out property <length> input-scroll-y;
+    in-out property <length> output-scroll-y;
+    in-out property <length> camera-scroll-y;
+    in-out property <length> display-scroll-y;
+    out property <length> carousel-x: slide.x;
+    out property <length> carousel-top: viewport.y;
+    out property <length> carousel-bottom: viewport.y + viewport.height;
+    out property <bool> carousel-moving: swipe.swiping || slide.x != -root.page * slide.page-width;
+    callback preview-page-changed(int);
+    changed page => { root.preview-page-changed(root.page); }
+    property <[string]> pages: ["Ton", "Medien", "Kamera", "Monitore"];
+    out property <int> page-count: pages.length;
+    property <bool> online: preview || connected;
+    property <length> page-margin: 40px;
+
+    Text {
+        x: root.page-margin; y: 28px; text: "Pro Remote"; color: #d4e9aa; font-size: 22px;
+    }
+    Text {
+        x: root.width - self.width - root.page-margin; y: 30px; width: 285px;
+        text: root.preview ? "Vorschau · Beispieldaten" : root.browser-preview
+            ? (root.connected ? "Mac live verbunden" : "Mac-Verbindung getrennt")
+            : (root.network-connected ? "Mac per WLAN verbunden" : root.connected ? "Mac per USB verbunden" : "Mac nicht verbunden");
+        color: #aab8ac; horizontal-alignment: right; font-size: 18px;
+    }
+    for title[index] in root.pages: Rectangle {
+        x: root.page-margin + index * 156px; y: 72px; width: 144px; height: 58px;
+        border-radius: 14px;
+        background: root.page == index ? #d4e9aa : #252d26;
+        Text {
+            width: parent.width; height: parent.height;
+            text: title; font-size: 21px;
+            color: root.page == index ? #1d281a : #e0e6db;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+        TouchArea { clicked => { root.page = index; } }
+    }
+
+    viewport := Rectangle {
+        x: 0px; y: 156px; width: root.width; height: root.height - 208px;
+        clip: true;
+        swipe := SwipeGestureHandler {
+            width: parent.width; height: parent.height;
+            handle-swipe-left: root.page < root.page-count - 1;
+            handle-swipe-right: root.page > 0;
+            swiped => {
+                if root.page > 0 && self.current-position.x - self.pressed-position.x > 90px { root.page -= 1; }
+                else if root.page < root.page-count - 1 && self.pressed-position.x - self.current-position.x > 90px { root.page += 1; }
+            }
+            slide := Rectangle {
+                property <length> page-width: swipe.width;
+                property <length> panel-width: (page-width - 2 * root.page-margin - 20px) / 2;
+                property <length> right-column-x: root.page-margin + panel-width + 20px;
+                property <length> slide-position: -root.page * page-width;
+                animate slide-position { duration: 180ms; easing: ease-out; }
+                property <length> drag-offset;
+                states [ dragging when swipe.swiping: {
+                    drag-offset: max(root.page == root.page-count - 1 ? 0px : -page-width,
+                        min(root.page == 0 ? 0px : page-width, swipe.current-position.x - swipe.pressed-position.x));
+                    out { animate drag-offset { duration: 180ms; easing: ease-out; } }
+                } ]
+                x: root.snapshot-layout ? -root.page * page-width : slide-position + drag-offset;
+                width: page-width * root.page-count; height: swipe.height;
+
+                DeviceList {
+                    x: root.page-margin; width: parent.panel-width; height: parent.height;
+                    heading: "Eingabe"; detail: "Standardmikrofon";
+                    scroll-y <=> root.input-scroll-y;
+                    devices: root.inputs; active-id: root.active-input; online: root.online;
+                    bottom-inset: root.browser-preview ? 164px : 0px;
+                    select(id) => {
+                        if root.preview { root.active-input = id; }
+                        else { root.select-audio("input", id); }
+                    }
+                }
+                if root.browser-preview: InputMeter {
+                    x: root.page-margin + 16px; y: parent.height - self.height - 16px; width: parent.panel-width - 32px;
+                    enabled: root.connected; measuring: root.meter-measuring;
+                    rms: root.meter-rms; peak: root.meter-peak; clipping: root.meter-clipping;
+                    message: root.meter-message;
+                    toggle => { root.toggle-meter(); }
+                }
+                DeviceList {
+                    x: parent.right-column-x; width: parent.panel-width; height: parent.height;
+                    heading: "Ausgabe"; detail: "Standardausgabe";
+                    scroll-y <=> root.output-scroll-y;
+                    devices: root.outputs; active-id: root.active-output; online: root.online;
+                    select(id) => {
+                        if root.preview { root.active-output = id; }
+                        else { root.select-audio("output", id); }
+                    }
+                }
+                Panel {
+                    x: parent.page-width + root.page-margin; width: parent.panel-width; height: parent.height;
+                    heading: "Wiedergabe"; detail: "Mac-Medientasten";
+                    for label[index] in ["Zurück", "Play / Pause", "Weiter"]: Rectangle {
+                        x: 24px + index * (parent.width - 36px) / 3;
+                        y: 108px; width: (parent.width - 72px) / 3; height: 68px;
+                        border-radius: 12px;
+                        background: !root.connected ? #29342c : index == 1 ? #d4e9aa : #354331;
+                        Text {
+                            width: parent.width; height: parent.height; horizontal-alignment: center; vertical-alignment: center;
+                            text: label; color: root.connected && index == 1 ? #1d281a : #dce8d9;
+                            font-size: 20px;
+                        }
+                        TouchArea { enabled: root.connected; clicked => {
+                            root.media-action(index == 0 ? "previous" : index == 1 ? "toggle" : "next");
+                        } }
+                    }
+                    Text {
+                        x: 24px; y: 202px; width: parent.width - 48px; height: 65px;
+                        text: root.media-message; font-size: 18px; color: #dce8d9; wrap: word-wrap;
+                    }
+                }
+                EmptyPanel {
+                    x: parent.page-width + parent.right-column-x; width: parent.panel-width; height: parent.height;
+                    heading: "Jetzt läuft"; detail: "macOS-Wiedergabesitzungen";
+                    empty-text: "Sitzungsliste und Cover noch nicht verfügbar";
+                }
+                DeviceList {
+                    x: 2 * parent.page-width + root.page-margin; width: parent.panel-width; height: parent.height;
+                    heading: "Kameras"; detail: "Verfügbare Mac-Kameras";
+                    scroll-y <=> root.camera-scroll-y;
+                    devices: root.cameras; active-id: root.selected-camera; online: root.camera-visible;
+                    active-label: "Gewählt"; no-devices: "Keine Kamera gefunden";
+                    select(id) => { root.select-camera(id); }
+                }
+                camera-panel := CameraPanel {
+                    x: 2 * parent.page-width + parent.right-column-x; width: parent.panel-width; height: parent.height;
+                    heading: "Vorschau"; detail: root.camera-fps > 0 ? "\{root.camera-name} · \{root.camera-fps} FPS" : root.camera-name;
+                    can-start: root.camera-visible && root.selected-camera != "";
+                    running: root.camera-running;
+                    message: root.camera-message != "" ? root.camera-message : !root.browser-preview && !root.network-connected ? "Mac per WLAN verbinden" : "Keine Vorschau aktiv";
+                    frame: root.camera-frame; has-frame: root.camera-has-frame;
+                    native-frame: root.camera-native-frame;
+                    toggle => { root.toggle-camera(); }
+                }
+                DeviceList {
+                    x: 3 * parent.page-width + root.page-margin; width: parent.panel-width; height: parent.height;
+                    heading: "Monitore"; detail: "Mit dem Mac verbundene Displays";
+                    scroll-y <=> root.display-scroll-y;
+                    devices: root.display-items; active-id: root.selected-display;
+                    online: root.display-visible; active-label: "Gewählt"; no-devices: "Keine Monitore verfügbar";
+                    select(id) => { root.select-display(id); }
+                }
+                if root.displays.length == 0: EmptyPanel {
+                    x: 3 * parent.page-width + parent.right-column-x; width: parent.panel-width; height: parent.height;
+                    heading: "Anzeige"; empty-text: root.display-message != "" ? root.display-message
+                        : root.display-visible ? "Monitore werden geladen" : "Warte auf den Mac";
+                }
+                for display in root.displays: MonitorDetails {
+                    visible: display.id == root.selected-display;
+                    x: 3 * parent.page-width + parent.right-column-x; width: parent.panel-width; height: parent.height;
+                    heading: display.name; detail: display.detail; brightness: display.brightness;
+                    online: root.display-visible; message: root.display-message;
+                    change(value) => { root.set-display-brightness(display.id, value); }
+                }
+            }
+        }
+    }
+    Text {
+        x: root.page-margin; y: root.height - 39px; width: root.width - 2 * root.page-margin;
+        text: root.page == 0 ? root.audio-error : ""; color: #f7b99c;
+        font-size: 18px; overflow: elide;
+    }
+}

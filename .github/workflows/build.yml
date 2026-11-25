@@ -1,0 +1,64 @@
+name: Build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  firmware:
+    name: Tab5 firmware
+    runs-on: ubuntu-24.04
+    container: espressif/idf:v5.4.2
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+            sh -s -- -y --no-modify-path --profile minimal --default-toolchain 1.100.0 --target riscv32imafc-unknown-none-elf
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Build firmware
+        run: |
+          source "$IDF_PATH/export.sh"
+          idf.py -C firmware -B "$PWD/firmware/build" -D "SDKCONFIG=$PWD/firmware/build/sdkconfig" \
+            merge-bin -o desk-remote-tab5.bin
+
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: desk-remote-tab5
+          path: |
+            firmware/build/desk-remote-tab5.bin
+            firmware/build/tab5_slint_smoke.bin
+          if-no-files-found: error
+
+  companion:
+    name: macOS companion
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build and package the companion
+        run: |
+          app_bundle="$(sh companion/build.sh)"
+          ditto -c -k --keepParent "$app_bundle" desk-remote-macos-arm64.zip
+
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          path: desk-remote-macos-arm64.zip
+          archive: false
+          if-no-files-found: error

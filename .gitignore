@@ -1,0 +1,7 @@
+/target/
+/web/pkg/
+/firmware/build/
+/firmware/managed_components/
+/firmware/sdkconfig
+/firmware/sdkconfig.old
+/companion/build/
